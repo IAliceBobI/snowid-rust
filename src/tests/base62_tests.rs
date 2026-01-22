@@ -80,4 +80,31 @@ mod tests {
             assert!(decoded > 0);
         }
     }
+
+    #[test]
+    fn test_base62_input_length_validation() {
+        let generator = SnowID::new(1).unwrap();
+
+        // Test that input longer than maximum u64 in base62 is rejected
+        let long_input = "a".repeat(12); // 12 characters > MAX_BASE62_LEN (11)
+        let result = generator.decode_base62(&long_input);
+        assert!(
+            result.is_err(),
+            "Should reject input longer than 11 characters"
+        );
+
+        // Verify the error type is correct
+        match result {
+            Err(Base62DecodeError::InvalidInput) => {}
+            _ => panic!("Expected InvalidInput error for long input"),
+        }
+
+        // Test that 11 character input is accepted (if valid base62)
+        let max_valid_input = "4Ly3K1aP0d0"; // u64::MAX in base62
+        let result = generator.decode_base62(max_valid_input);
+        // This should not fail due to length (may fail for other reasons if input is invalid)
+        if let Err(Base62DecodeError::InvalidInput) = result {
+            panic!("Should accept 11 character input");
+        }
+    }
 }

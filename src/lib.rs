@@ -25,6 +25,14 @@ pub fn base62_encode(id: u64) -> String {
 
 /// Decode a base62 string to a u64, handling potential overflow
 pub fn base62_decode(encoded: &str) -> Result<u64, Base62DecodeError> {
+    // Validate input length to prevent DoS attacks
+    // Maximum u64 value (18446744073709551615) in base62 is "4Ly3K1aP0d0" (11 chars)
+    const MAX_BASE62_LEN: usize = 11;
+
+    if encoded.len() > MAX_BASE62_LEN {
+        return Err(Base62DecodeError::InvalidInput);
+    }
+
     let decoded = base62::decode(encoded).map_err(Base62DecodeError::from)?;
 
     // Check if the decoded value fits in a u64
@@ -40,6 +48,9 @@ pub fn base62_decode(encoded: &str) -> Result<u64, Base62DecodeError> {
 pub enum Base62DecodeError {
     #[error("Invalid base62 character")]
     InvalidCharacter,
+
+    #[error("Invalid input: string too long for u64")]
+    InvalidInput,
 
     #[error("Decoded value would overflow u64")]
     Overflow,
@@ -119,18 +130,19 @@ impl SnowID {
     /// * `u64` - New SnowID value
     #[inline]
     pub fn generate(&self) -> u64 {
-        // Fast path: try to get sequence in current millisecond with relaxed ordering
-        let seq = self.sequence.fetch_add(1, Ordering::Relaxed);
+        // Fast path: check timestamp initialization first to avoid sequence waste
+        let last_ts = self.last_timestamp.load(Ordering::Acquire);
+
+        // If timestamp is not initialized, go to slow path (without consuming sequence)
+        if last_ts == 0 {
+            return self.generate_slow_path();
+        }
+
+        // Fast path: try to get sequence in current millisecond with AcqRel ordering
+        let seq = self.sequence.fetch_add(1, Ordering::AcqRel);
 
         // Fast path: if sequence is available, return immediately
         if seq < self.config.max_sequence_id() {
-            // Use acquire fence to ensure we see the correct timestamp
-            std::sync::atomic::fence(Ordering::Acquire);
-            let last_ts = self.last_timestamp.load(Ordering::Relaxed);
-            // If timestamp is 0, we haven't initialized yet - go to slow path
-            if last_ts == 0 {
-                return self.generate_slow_path();
-            }
             return self.create_snowid(last_ts, seq + 1);
         }
 
