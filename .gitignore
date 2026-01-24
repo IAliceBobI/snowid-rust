@@ -5,3 +5,4 @@
 *.iml
 CLAUDE.md
 .claude/
+.claudeignore
